@@ -12,14 +12,35 @@ import (
 )
 
 type (
+	XMLObjectAttrs map[string]string
+
 	XMLObject struct {
-		Name              xml.Name     // XML node kind/name.
-		Id                string       // XML node id. Let's store it separately from others attributes.
-		Attrs             []xml.Attr   // XML node attributes.
-		ObjKey, ParObjKey string       // Used to save hierarchical info after data flattening.
-		Children          []*XMLObject // Used to store children after Unmarshal'ing. Empty after flattening.
+		Name              xml.Name       // XML node kind/name.
+		Id                string         // XML node id. Let's store it separately from others attributes.
+		Attrs             XMLObjectAttrs // XML node attributes.
+		ObjKey, ParObjKey string         // Used to save hierarchical info after data flattening.
+		Children          []*XMLObject   // Used to store children after Unmarshal'ing. Empty after flattening.
 	}
 )
+
+func (attrs XMLObjectAttrs) String() string {
+	result := "["
+	for key, val := range attrs {
+		result += fmt.Sprintf("(%s:%s)", key, val)
+	}
+	result += "]"
+
+	return result
+}
+
+func (obj *XMLObject) String() string {
+	return fmt.Sprintf("{Name: '%s'; Id: '%s'; ObjKey: '%s'; ParObjKey: '%s'; Attrs: '%v'}",
+		obj.Name.Local,
+		obj.Id,
+		obj.ObjKey,
+		obj.ParObjKey,
+		obj.Attrs)
+}
 
 func (obj *XMLObject) UFKey() string {
 	return obj.ObjKey
@@ -29,7 +50,7 @@ func (obj *XMLObject) UFParentKey() string {
 	return obj.ParObjKey
 }
 
-func (obj *XMLObject) UFAppendChild(child uf.UnFlattenable) error {
+func (obj *XMLObject) UFAppendChild(child uf.Un) error {
 	if obj == nil {
 		return fmt.Errorf("nil receiver")
 	}
@@ -47,8 +68,13 @@ func (obj *XMLObject) UFAppendChild(child uf.UnFlattenable) error {
 	return nil
 }
 
-func (obj *XMLObject) UFGetChildren() ([]uf.UnFlattenable, error) {
-	children := make([]uf.UnFlattenable, 0, len(obj.Children))
+func (obj *XMLObject) UFUnlinkChildren() error {
+	obj.Children = nil
+	return nil
+}
+
+func (obj *XMLObject) UFGetChildren() ([]uf.Flattenable, error) {
+	children := make([]uf.Flattenable, 0, len(obj.Children))
 	for _, child := range obj.Children {
 		children = append(children, child)
 	}
@@ -80,8 +106,12 @@ func TestUnFlattenXML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if xmlEntities, err := uf.Flatten(&xmlObjModel); err == nil {
-		if unflattened, err := uf.Unflatten(xmlEntities); err == nil {
+	if flattened, err := uf.Flatten(&xmlObjModel); err == nil {
+		for _, flattenedEntity := range flattened {
+			t.Log(flattenedEntity)
+		}
+
+		if unflattened, err := uf.Unflatten(flattened); err == nil {
 			if len(unflattened) != 1 {
 				t.Fatal("can be only 1 root in this test")
 			}
@@ -103,11 +133,12 @@ func TestUnFlattenXML(t *testing.T) {
 func (obj *XMLObject) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	obj.Name = start.Name
 
+	obj.Attrs = make(XMLObjectAttrs)
 	for _, attr := range start.Attr {
 		if attr.Name.Local == "id" {
 			obj.Id = attr.Value
 		} else {
-			obj.Attrs = append(obj.Attrs, attr)
+			obj.Attrs[attr.Name.Local] = attr.Value
 		}
 	}
 
@@ -148,8 +179,8 @@ func (obj XMLObject) MarshalXML(e *xml.Encoder, start xml.StartElement) error {
 		el.Attr = []xml.Attr{{Name: xml.Name{Local: "id"}, Value: obj.Id}}
 	}
 
-	if len(obj.Attrs) > 0 {
-		el.Attr = append(el.Attr, obj.Attrs...)
+	for attrKey, attrVal := range obj.Attrs {
+		el.Attr = append(el.Attr, xml.Attr{Name: xml.Name{Local: attrKey}, Value: attrVal})
 	}
 
 	if err := e.EncodeToken(el); err != nil {

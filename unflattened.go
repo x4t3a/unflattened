@@ -9,13 +9,18 @@ import (
 
 type (
 	Flattenable interface {
-		UFGetChildren() ([]UnFlattenable, error)
+		UFUnlinkChildren() error
+		UFGetChildren() ([]Flattenable, error)
+	}
+
+	Un interface {
+		UFKey() string
+		UFParentKey() string
+		UFAppendChild(Un) error
 	}
 
 	UnFlattenable interface {
-		UFKey() string
-		UFParentKey() string
-		UFAppendChild(UnFlattenable) error
+		Un
 		Flattenable
 	}
 
@@ -66,6 +71,10 @@ func sendAppendSink(sink chan<- Flattenable, entity Flattenable) error {
 	} else {
 		for _, chEntity := range children {
 			sendAppendSink(sink, chEntity)
+		}
+
+		if err := entity.UFUnlinkChildren(); err != nil {
+			return err
 		}
 	}
 
